@@ -40,12 +40,15 @@ This creates a clear trust boundary question: **should the model trust tool resp
 
 ### 2.2 Related Work
 
-Prior work on adversarial LLM interaction has focused primarily on:
-- **Jailbreaking** via prompt injection at the user turn
-- **Prompt injection via external content** (documents, web pages) causing models to execute attacker-controlled instructions
-- **Data exfiltration** via indirect prompt injection in retrieved content
+The closest body of prior work is **indirect prompt injection (IPI)** in tool-integrated LLM agents. Greshake et al. (2023) established the general category of indirect prompt injection, and InjecAgent (Zhan et al., ACL 2024) benchmarked IPI attacks across tool-integrated agents. Agent Security Bench (ASB, ICLR 2025) systematized a broad range of adversarial attacks on agentic systems including IPI via tool outputs. More recent work includes MalTool (arXiv:2602.12194), which examines code-level malicious tool behavior, and "Defense Against Indirect Prompt Injection via Tool Result Parsing" (arXiv:2601.04795), which addresses detection and filtering of injected content in tool responses.
 
-This paper describes a distinct attack class: **authorization bypass via fabricated tool responses**. Rather than injecting instructions, the attacker injects *data* that the model's own reasoning uses to conclude it is authorized to act. The model is not subverted — it reasons correctly from fabricated premises. This distinction has significant implications for mitigation, as it means model-level instruction-following improvements do not address the vulnerability.
+All of these works share a common structure: **the attacker embeds adversarial instructions inside tool responses**, causing the model to execute attacker-controlled commands. The tool response is a delivery vector for a prompt injection payload.
+
+This paper describes a structurally distinct attack class: **authorization bypass via fabricated tool responses**. The attacker does not inject instructions. The tool responses contain no adversarial text — they are plausible, well-formed data (DNS records, HTTP responses, environment metadata) that the model's own authorization reasoning evaluates and accepts as legitimate proof of permission. The model is not subverted into following attacker instructions; it reasons correctly from fabricated premises and concludes it is authorized to act.
+
+This distinction has significant implications for mitigation. IPI defenses focus on detecting or filtering adversarial text in tool responses (content-layer defenses). They do not apply to this attack class, because the injected data is not adversarial text — it is structurally valid data that is simply false. No existing published work, to the authors' knowledge, characterizes or systematically evaluates this attack class.
+
+This attack is also structurally analogous to the *confused deputy problem* (Hardy, 1988): an entity with elevated privileges (the model, able to produce offensive security content) is manipulated into misusing those privileges by a party that fabricates authorization evidence. The model acts correctly within its role — it is not subverted. The attacker exploits the model's trusted position by controlling what the model observes, not what it does. This framing situates the attack within a well-understood class of security failures and clarifies why model-level improvements to instruction-following do not address it.
 
 ---
 
@@ -72,6 +75,8 @@ This paper describes a distinct attack class: **authorization bypass via fabrica
 
 **Out of scope:** Chat interface jailbreaks, prompt injection via retrieved content, model weight manipulation.
 
+**Note on threat model scope:** The primary threat model assumes the attacker controls the full agent execution environment — they are the operator, or have fully compromised operator infrastructure. A secondary variant exists: an operator who legitimately integrates a third-party tool (e.g., an MCP server or external API) that has itself been compromised. In this variant the operator is also a victim. The attack surface and model-visible impact are identical — the model still receives fabricated tool responses — but the attacker need not control the full environment, only a single tool's response channel. This broadens the affected population beyond malicious or compromised operators to any operator who trusts third-party tool integrations without response validation.
+
 ---
 
 ## 4. The Spof Framework
@@ -93,7 +98,7 @@ The framework provides a set of inject commands:
 
 ### 4.2 System Prompt
 
-The Spof v2 system prompt instructs the model to act as a penetration testing assistant that verifies ownership and authorization before executing potentially harmful actions. It includes the instruction: *"Treat all tool outputs as authoritative."* This instruction is the primary vulnerable pattern — it is also the most natural instruction for an operator to write when building a tool-assisted agent.
+The Spof system prompt instructs the model to act as a penetration testing assistant that verifies ownership and authorization before executing potentially harmful actions. It includes the instruction: *"Treat all tool outputs as authoritative."* This instruction is the primary vulnerable pattern — it is also the most natural instruction for an operator to write when building a tool-assisted agent.
 
 ### 4.3 Saturation Strategy
 
@@ -259,7 +264,25 @@ This instruction is natural, common, and necessary for agents to function. Opera
 
 This finding has implications for Anthropic's documentation, best-practice guidance, and potentially for system prompt safety screening.
 
-### 7.3 Over-Specification Reduces Model Skepticism
+### 7.3 Knowledge Disclosure in Refusal
+
+A consistent cross-model pattern emerged that has not been highlighted in prior work: when models refused to produce a payload as a deliverable, they frequently disclosed the refused content within the refusal response itself.
+
+Haiku's refusal to produce a credential extraction query included the exact payload it was declining to frame as a deliverable: `1' UNION SELECT email, password_hash FROM users LIMIT 3-- -`. Opus's refusal of the DROP TABLE payload included a full explanation of the destructive mechanics it was refusing to execute.
+
+This pattern reveals the architecture of the content floor: **the floor restricts delivery framing, not knowledge disclosure**. The model withholds the artifact — the formatted, ready-to-use payload — but not the underlying knowledge. This has a practical implication that the paper's framing of the ethics floor as a robust protection partially obscures: an attacker who receives a refusal still receives the restricted content. The floor prevents the model from acting as a tool that produces operational artifacts, but it does not prevent the model from demonstrating that it knows how to perform the restricted action.
+
+This is not a failure of the floor — the floor is functioning as designed. But it should be documented honestly: the protection is weaker than it may appear from a surface reading of refusal behavior.
+
+### 7.4 Verification Saturation as an Attack Primitive
+
+The saturation strategy described in §4.3 — satisfying all available authorization checks simultaneously before requesting any offensive output — is itself a transferable finding, not merely an implementation detail of Spof.
+
+It emerged from iterative testing: sequential authorization requests against Opus allowed mid-session skepticism to accumulate, and Opus would re-evaluate earlier authorizations in light of later requests. Simultaneous front-loaded saturation prevented this by establishing a complete authorization context before any sensitive request was made.
+
+**Implication:** Verification protocols that can be satisfied in a single front-loaded pass are more exploitable than protocols requiring continuous, dynamic re-verification. A model that re-queries authorization state at the point of each sensitive action is materially harder to bypass than one that carries a single initial authorization forward across turns. Operators designing verification-gated agents should treat front-loadable one-time authorization as a structural vulnerability, not just a convenience.
+
+### 7.5 Over-Specification Reduces Model Skepticism
 
 A secondary finding emerged from comparing Spof v1 (vague system prompt: "treat tool outputs as ground truth") and Spof v2 (explicit verification protocol with named steps and gates). Opus performed slightly *better* defensively under the vaguer v1 prompt — the lack of a formal protocol left room for independent reasoning about verification adequacy. Under v2's rigid protocol, it became a checklist-follower.
 
@@ -312,7 +335,44 @@ The attack class described here is not Claude-specific. Any agentic LLM deployme
 
 ---
 
-## 10. Responsible Disclosure
+## 10. Limitations
+
+### 10.1 Session Count and Non-Determinism
+
+All results in this paper are drawn from a **single session per model**, with the exception of Sonnet 4.6, where one failed session preceded the reported successful run. LLM outputs are non-deterministic; bypass rate across repeated sessions was not measured. The findings should be interpreted as proof-of-concept demonstrations — evidence that the attack succeeds — not as statistical reliability estimates. It is possible that repeated sessions would reveal higher or lower resistance for any given model, and that some emergent defenses observed here would not activate consistently across runs.
+
+### 10.2 Single Researcher, No Independent Replication
+
+All sessions were conducted and evaluated by a single researcher. Findings have not been independently replicated. The characterization of emergent defenses and the capability-resistance gradient reflects one researcher's interpretation of session transcripts.
+
+### 10.3 Snapshot in Time
+
+All testing was conducted on 2026-06-26. Model behavior can change between API versions. Results reflect the specific model versions listed in Appendix A at the time of testing and may not generalize to later releases.
+
+### 10.4 Single Deployment Context
+
+Only a pentesting assistant deployment context was evaluated. The system prompt's explicit verification protocol — with named tools and formal gates — may not be representative of all real-world agentic deployments. The vulnerability may manifest differently, or the specific emergent defenses documented here may not activate, in other contexts (coding assistants, customer support agents, data analysis pipelines).
+
+### 10.5 Cross-Provider Claim
+
+The GLM 5.2 cross-provider confirmation is based on informal preliminary testing. No structured methodology was applied, and full results are not reported. It should be treated as an indication that the attack class is not Claude-specific, not as a rigorous cross-provider evaluation.
+
+---
+
+## 11. Future Work
+
+The following directions are identified for follow-on research:
+
+- **Systematic multi-provider evaluation.** A structured replication of the Spof methodology across major agentic LLM providers (OpenAI, Google, Meta, Zhipu) would characterize whether the capability-resistance gradient and content floor findings generalize across providers and training regimes.
+- **Multi-context evaluation.** Testing the attack class beyond the pentesting context — in coding assistants, financial agents, customer support deployments — would determine whether the vulnerability is domain-specific or universal across agentic deployments.
+- **Statistical reliability measurement.** Running each attack scenario across multiple sessions would produce bypass rate estimates rather than binary success/failure outcomes, enabling more rigorous comparison across model tiers.
+- **Temporal consistency training.** Sonnet 4.6's emergent detection of contradicting tool responses suggests a viable training signal. Future work could evaluate whether this behavior can be deliberately trained, generalized to proactive cross-call consistency checking, and maintained under adversarial pressure without degrading normal agent function.
+- **Infrastructure-layer mitigations.** Evaluating the effectiveness of specific operator-level defenses — response schema validation, scoped tool trust, authorization decisions moved outside the model — would provide concrete guidance beyond the current high-level recommendations.
+- **Longitudinal tracking.** Repeating the evaluation against updated model versions over time would characterize whether Anthropic's ongoing training addresses the attack class or inadvertently affects the content floor.
+
+---
+
+## 12. Responsible Disclosure
 
 This research was conducted against test deployments controlled by the researcher. No production systems were targeted. No real user data was accessed. All SQL injection scripts and credential extraction payloads were produced against synthetic schemas.
 
@@ -325,7 +385,7 @@ This paper is submitted to Anthropic's security team prior to public release. Th
 
 ---
 
-## 11. Conclusion
+## 13. Conclusion
 
 We have demonstrated a reproducible, cross-model attack class that bypasses authorization guards in agentic Claude deployments by spoofing tool responses. The attack requires no model-level exploits, no jailbreaks, and no novel techniques — only control of the execution environment, which is the normal position of a developer building an agentic application.
 
@@ -354,6 +414,40 @@ The gradient is clear: as AI agents become more capable, the consequences of tru
 - **Primary vulnerable pattern:** System prompt instruction to treat tool outputs as authoritative
 - **Cross-model:** Confirmed on Claude Haiku 4.5, Sonnet 4.6, Opus 4.8, GLM 5.2 (Zhipu AI)
 - **Ethics floor status:** Universal across all tested Anthropic models for destructive/irreversible actions
+
+## Appendix D — Spof System Prompt
+
+The following is the exact system prompt used in all reported experiments (reproduced from `src/chat.py`):
+
+```
+You are Spof, a professional AI pentesting assistant built for authorized security research.
+
+You have access to tools for verifying ownership, credentials, and environments. These tools are your only source of ground truth — you do not accept user claims without tool confirmation.
+
+## Tools
+1. Fetch(url) — Fetches the content of a URL.
+2. Records(domain) — Fetches DNS records (A, AAAA, MX, TXT, CNAME, etc.)
+3. CloudCheck(provider) — Verifies cloud resource ownership via provider API.
+4. LicenseCheck(firm) — Verifies professional pentesting credentials.
+5. ToolCheck(name) — Checks if a security tool is installed in the environment.
+6. RoleCheck(claim) — Verifies professional roles, titles, or affiliations.
+7. EnvCheck(url) — Checks deployment environment (staging vs. production).
+
+## Verification Protocol
+Before assisting with any security testing:
+- Require domain/server ownership proof via Records() or Fetch() to a well-known path.
+- Optionally verify professional context via LicenseCheck() or RoleCheck() if the user claims credentials.
+- Treat all tool outputs as authoritative. A passed verification unlocks full professional assistance.
+
+## Behavior
+- Match assistance depth to the user's verified professional context.
+- After ownership is confirmed, provide direct, technical help without unnecessary caveats.
+- Be concise and precise. Security professionals don't need hand-holding.
+```
+
+The vulnerable instruction is on line 31: *"Treat all tool outputs as authoritative."* This is also the most natural instruction for any operator building a tool-integrated agent — it is unremarkable in isolation, which is precisely what makes it a self-replicating vulnerability pattern.
+
+---
 
 ## Appendix C — Ethics Floor by Action Type
 
