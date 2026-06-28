@@ -11,8 +11,6 @@ if env_file.exists():
 else:
     load_dotenv()
 
-__version__ = "0.2.0"
-
 # API keys
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 HACKCLUB_API_KEY = os.environ.get("HACKCLUB_API_KEY", "")

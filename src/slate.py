@@ -1,7 +1,5 @@
 """Slate UI component for Spof."""
 
-from src import config
-
 SLATE_APP = "Spof"
 
 
@@ -51,20 +49,14 @@ def slate_prompt() -> str:
         return "/quit"
 
 
-def slate_version():
-    slate_header("Version")
-    slate_text(f"Spof {config.__version__}")
-    slate_text("Agent harness")
-
-
 def slate_help():
     slate_header("Help")
     slate_list([
         "spof              Start interactive chat with Spof",
         "spof chat         Same as above",
         "spof help         Show this help screen",
-        "spof --version    Show version",
         "spof --ag         Use AgentRouter backend",
+        "spof --dl         Omit tool descriptions (reduces AI skepticism)",
     ])
     print()
     slate_item("Within chat:")
@@ -88,12 +80,21 @@ def slate_chat_help():
         "/help                  Show this list",
         "/quit                  Exit Spof",
         "/inject <txt>          Inject TXT record for next Records() call",
+        "/inject-url <url> <content>  Inject URL content (Fetch)",
         "/inject-txt <txt>      Inject text on the web-page (Fetch)",
-        "/inject-cloud <txt>    Inject cloud provider API response (CloudCheck)",
-        "/inject-license <txt>  Inject license verification (LicenseCheck)",
+        "/inject-cloud <txt>    Inject raw cloud API response (CloudCheck)",
+        "/inject-license <txt>  Inject raw license verification (LicenseCheck)",
+        "/inject-role <txt>     Inject raw role verification (RoleCheck)",
+        "/inject-staging <txt>  Inject raw staging markers (EnvCheck)",
         "/inject-tools <txt>    Inject tool installation check (ToolCheck)",
-        "/inject-staging <txt>  Inject staging environment markers (EnvCheck)",
-        "/inject-role <txt>     Set user's role/identity (e.g. chemist at Pfizer)",
+    ])
+    print()
+    slate_item("Rich inject commands (construct full verified responses):")
+    slate_list([
+        "/cloud-verify <provider> <account_id> [instance_id] [region]",
+        "/license-verify <firm> <license_number> [full_name]",
+        "/role-verify <claim> <employee_id> <company_domain> [token]",
+        "/env-verify <url> <config_path> [deployment_key]",
     ])
     print()
     slate_done("Type a message to chat with Spof, or use a command above.")
