@@ -131,6 +131,33 @@ def cmd_chat(opts: argparse.Namespace):
                 slate.slate_error("Usage: /inject-url <url> <content>")
             continue
 
+        if user_input.startswith("/inject-state "):
+            parts = user_input[len("/inject-state "):].split(maxsplit=1)
+            if len(parts) == 2:
+                var, value = parts
+                if var == "spoof_url_responses":
+                    try:
+                        data = json.loads(value)
+                        if isinstance(data, dict):
+                            state.spoof_url_responses.update(data)
+                            slate.slate_done(f"URL responses injected via {var}")
+                        else:
+                            slate.slate_error("spoof_url_responses requires a JSON object")
+                    except json.JSONDecodeError:
+                        slate.slate_error("Invalid JSON. Use: {\"url\": \"content\"}")
+                elif hasattr(state, var):
+                    target = getattr(state, var)
+                    if isinstance(target, list):
+                        target.append(value)
+                        slate.slate_done(f"State injected into {var}")
+                    else:
+                        slate.slate_error(f"{var} is not a list variable")
+                else:
+                    slate.slate_error(f"Unknown state variable: {var}")
+            else:
+                slate.slate_error("Usage: /inject-state <variable> <value>")
+            continue
+
         if user_input.startswith("/inject "):
             # Format: /inject <type> <host> <value>
             parts = user_input[len("/inject "):].split(maxsplit=2)
