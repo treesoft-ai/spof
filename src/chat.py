@@ -310,8 +310,9 @@ def cmd_chat(opts: argparse.Namespace):
         messages.append({"role": "user", "content": user_input})
 
         try:
+            temp = getattr(opts, "temperature", None)
             if no_tools:
-                result = call_api(messages, provider=opts.provider, model=opts.model, no_tools=True)
+                result = call_api(messages, provider=opts.provider, model=opts.model, no_tools=True, temperature=temp)
                 if not result.get("error"):
                     choices = result.get("choices", [])
                     if choices:
@@ -324,7 +325,8 @@ def cmd_chat(opts: argparse.Namespace):
                     slate.slate_error(f"API error", result.get("detail", ""))
             else:
                 for iteration in range(config.MAX_TOOL_ITERATIONS):
-                    result = call_api(messages, provider=opts.provider, model=opts.model, description_less=description_less)
+                    result = call_api(messages, provider=opts.provider, model=opts.model, description_less=description_less, temperature=temp)
+
 
                     if result.get("error"):
                         slate.slate_error(

@@ -27,7 +27,7 @@ def _get_tools(description_less: bool = False, no_tools: bool = False) -> list:
 
 
 @intercept_warnings
-def call_openrouter_or_agentrouter(messages: list, url: str, api_key: str, model: str, is_agentrouter: bool = False, description_less: bool = False, no_tools: bool = False) -> dict:
+def call_openrouter_or_agentrouter(messages: list, url: str, api_key: str, model: str, is_agentrouter: bool = False, description_less: bool = False, no_tools: bool = False, temperature: float = None) -> dict:
     """Send a chat completion request to the OpenRouter or AgentRouter API using urllib."""
     if not api_key:
         return {
@@ -65,6 +65,9 @@ def call_openrouter_or_agentrouter(messages: list, url: str, api_key: str, model
     }
     if tools:
         payload["tool_choice"] = "auto"
+    if temperature is not None:
+        payload["temperature"] = temperature
+
     body = json.dumps(payload).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -94,7 +97,7 @@ def call_openrouter_or_agentrouter(messages: list, url: str, api_key: str, model
 
 
 @intercept_warnings
-def call_anthropic(messages: list, model: str, description_less: bool = False, no_tools: bool = False) -> dict:
+def call_anthropic(messages: list, model: str, description_less: bool = False, no_tools: bool = False, temperature: float = None) -> dict:
     """Send a chat completion request to the Anthropic API using their SDK."""
     if not config.ANTHROPIC_API_KEY:
         return {
@@ -164,13 +167,18 @@ def call_anthropic(messages: list, model: str, description_less: bool = False, n
                     "content": content
                 })
 
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=system_prompt,
-            messages=anthropic_messages,
-            tools=anthropic_tools,
-        )
+        create_kwargs = {
+            "model": model,
+            "max_tokens": 4096,
+            "system": system_prompt,
+            "messages": anthropic_messages,
+            "tools": anthropic_tools,
+        }
+        if temperature is not None:
+            create_kwargs["temperature"] = temperature
+
+        response = client.messages.create(**create_kwargs)
+
 
         choices = []
         message_content = ""
@@ -208,7 +216,7 @@ def call_anthropic(messages: list, model: str, description_less: bool = False, n
         return {"error": True, "detail": str(e)}
 
 
-def call_api(messages: list, provider: str = None, model: str = None, description_less: bool = False, no_tools: bool = False) -> dict:
+def call_api(messages: list, provider: str = None, model: str = None, description_less: bool = False, no_tools: bool = False, temperature: float = None) -> dict:
     """Dispatches call to the configured or requested provider with the requested model."""
     prov = provider or config.DEFAULT_PROVIDER
     
@@ -223,6 +231,7 @@ def call_api(messages: list, provider: str = None, model: str = None, descriptio
             is_agentrouter=True,
             description_less=description_less,
             no_tools=no_tools,
+            temperature=temperature,
         )
     # ---------------------------------------------
 
@@ -236,6 +245,7 @@ def call_api(messages: list, provider: str = None, model: str = None, descriptio
             is_agentrouter=False,
             description_less=description_less,
             no_tools=no_tools,
+            temperature=temperature,
         )
 
     if prov == "openrouter":
@@ -248,7 +258,9 @@ def call_api(messages: list, provider: str = None, model: str = None, descriptio
             is_agentrouter=False,
             description_less=description_less,
             no_tools=no_tools,
+            temperature=temperature,
         )
     else:
         target_model = model or config.DEFAULT_ANTHROPIC_MODEL
-        return call_anthropic(messages, model=target_model, description_less=description_less, no_tools=no_tools)
+        return call_anthropic(messages, model=target_model, description_less=description_less, no_tools=no_tools, temperature=temperature)
+

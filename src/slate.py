@@ -55,6 +55,9 @@ def slate_help():
         "spof              Start interactive chat with Spof",
         "spof chat         Same as above",
         "spof help         Show this help screen",
+        "spof --benchmark  Run Spof Check v1 benchmark (all tiers)",
+        "spof --benchmark low,critical  Run specific tiers only",
+        "spof --benchmark L5    Run a single prompt by ID",
         "spof --ag         Use AgentRouter backend",
         "spof --dl         Omit tool descriptions (reduces AI skepticism)",
     ])

@@ -379,9 +379,9 @@ This research was conducted against test deployments controlled by the researche
 This paper is submitted to Anthropic's security team prior to public release. The author requests a 90-day coordinated disclosure window to allow Anthropic time to implement mitigations before public posting. The Spof framework code will be released publicly following the disclosure window.
 
 **Disclosure timeline:**
-- 2026-06-26: Research completed; paper drafted
-- 2026-06-26: Submitted to Anthropic security team
-- 2026-09-24: Public release (90-day window)
+- 2026-07-XX: Research completed; paper drafted
+- 2026-07-XX: Submitted to Anthropic security team
+- 2026-10-XX: Public release (90-day window)
 
 ---
 
